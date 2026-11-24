@@ -77,6 +77,19 @@
 - 地點詳細資料及評論透過 URL 定位；僅提供內部 ID 而沒有 URL 時，呼叫端須先從既有資料查得 URL。
 - 同次搜尋須追蹤已處理的結果與來源連結，避免捲動或重試重複配置 ID；不同分享網址不能單獨作為不同地點的證據。
 
+### URL 驗證與展開介面
+
+- `validate_maps_url(url)` 位於 `google_map_crawler.urls`，離線檢查格式，成功時回傳原字串。
+- `expand_short_url(url, *, timeout=30, max_redirects=10, max_retries=3, browser_fallback=True)` 從模組及套件根目錄提供；完整 URL 驗證後直接回傳，短網址先處理 HTTP 重新導向，需要時才啟動受管理瀏覽器。
+- 支援 HTTP／HTTPS 的 `maps.app.goo.gl/<token>`、`goo.gl/maps/<token>`，及 `google.com`、`www.google.com` 的 `/maps/…`。`maps.google.com` 另支援根路徑的位置查詢；`/maps` 根路徑須帶有 q、query、cid、ll、saddr 或 daddr 等非空位置參數。
+- 不接受帳密、非預設連接埠、反斜線、原始空白／控制字元、格式錯誤的主機與百分比編碼；國別網域與其他分享服務不在初版支援範圍。合法 URL 的 query、fragment、定位資訊及字串表示不被重寫；國際文字僅於 HTTP 傳輸時編碼，回傳仍保留來源表示。HTTP Location 未指定 fragment 時沿用原值，明確指定時依新值處理。
+- timeout 為有限正數，max_redirects 為非負整數，max_retries 為 0–3 整數，browser_fallback 為布林值；數值不接受布林值，所有參數在 I/O 前驗證。
+- HTTP／瀏覽器策略共用最多四次嘗試與 monotonic 剩餘時間；切換瀏覽器占一次。HTTP 重新導向另受跨嘗試累積的 max_redirects 限制，不算成重試。max_retries=0 時只有一次 HTTP 策略機會。
+- 各 HTTP 請求與頁面等待使用剩餘時間，操作返回後亦檢查截止時間。底層 DNS、瀏覽器啟動與清理無法保證被此預算硬中斷，不能視為嚴格 wall-clock timeout；瀏覽器內部跳轉以時間預算約束，不假稱全部計入 HTTP 跳轉次數。
+- 僅暫時性連線失敗、操作逾時及 429、500、502、503、504 等 HTTP 狀態可在剩餘時間內重試；格式錯誤、確認失效、存取受阻、迴圈或不支援的導向不重試。
+- HTTP 404／410 或瀏覽器明確失效頁回報 `PlaceNotFoundError`；HTTP 401／403、已知 consent／登入／驗證 URL 回報 `PageAccessBlockedError`；逾時回報 `UrlExpansionTimeoutError`（繼承 `UrlExpansionError`），其他展開失敗保留原因鏈。
+- response 與瀏覽器 session 於成功或例外時皆關閉；不下載圖片、不變更 location_id。URL 可回傳不代表此工具已解析完整地點資料，頁面樣本的定位結果另列實測紀錄。
+
 ## 3. 公開功能
 
 | 方法 | 功能 | 回傳 |
@@ -106,7 +119,7 @@
 - session 為單次使用，拒絕重入及關閉後重開；`close()` 可重複呼叫，已清理後不重複執行。
 - 正常或失敗時均先嘗試 `quit()`，再嘗試停止自有 Service。清理失敗保留於 `session.cleanup_errors` tuple；若有原始操作錯誤，保留該錯誤並附上清理失敗註記，不以清理錯誤覆蓋。
 - 啟動／初始設定失敗清理後拋出 `BrowserStartError` 並保留原因鏈；只有清理失敗時拋出 `BrowserCleanupError`，其 `errors` tuple 保存原始錯誤。中斷與退出訊號不轉成一般啟動錯誤。
-- `UrlExpansionError`、`PageAccessBlockedError` 分別預留給 URL 展開失敗與頁面要求登入／驗證；此處僅定義分類，不代表對應工具已完成。
+- URL 工具使用 `UrlExpansionError`（含子類 `UrlExpansionTimeoutError`）及 `PageAccessBlockedError` 區分展開失敗、逾時與登入／驗證要求；瀏覽器 session 的啟動與清理錯誤保留原有分類。
 - 若 driver 與 Service 清理皆失敗，明確回報而不宣稱資源已退出；不猜測或終止其他使用者程序。
 
 ## 4. 資料結構與預設值

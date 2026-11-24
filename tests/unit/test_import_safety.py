@@ -30,6 +30,16 @@ session = BrowserSession(config)
 assert "selenium" not in sys.modules
 session.close()
 
+full_url = "https://www.google.com/maps/place/Example/@25,121,17z"
+assert google_map_crawler.expand_short_url(full_url) == full_url
+try:
+    google_map_crawler.expand_short_url("https://example.com/maps/place/a")
+except google_map_crawler.InvalidMapsUrlError:
+    pass
+else:
+    raise AssertionError("Invalid Maps URL was accepted")
+assert "selenium" not in sys.modules
+
 location_id = google_map_crawler.resolve_location_id()
 place = google_map_crawler.PlaceDetail(
     location_id=location_id, maps_url="https://maps.app.goo.gl/example"

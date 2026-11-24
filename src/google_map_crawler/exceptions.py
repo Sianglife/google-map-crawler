@@ -58,6 +58,10 @@ class UrlExpansionError(CrawlerError):
     """A short URL could not be expanded to its destination."""
 
 
+class UrlExpansionTimeoutError(UrlExpansionError):
+    """URL expansion ran out of time or a network/page operation timed out."""
+
+
 class PageAccessBlockedError(CrawlerError):
     """A page requires authentication or verification before it can be used."""
 

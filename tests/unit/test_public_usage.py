@@ -110,3 +110,19 @@ def test_matching_example_demonstrates_selection_no_match_and_ties(tmp_path):
     assert len(data["ambiguity"]["matches"]) == 2
     assert all(item["difference_count"] == 1 for item in data["ambiguity"]["matches"])
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("arguments,code", [([], 0), (["https://example.com/maps/place/a"], 2)])
+def test_url_example_full_and_invalid_paths_are_offline(tmp_path, arguments, code):
+    example = Path(__file__).resolve().parents[2] / "examples" / "expand_url.py"
+    result = subprocess.run(
+        [sys.executable, "-I", "-X", "utf8", str(example), *arguments],
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert result.returncode == code
+    if code == 0:
+        assert result.stdout.strip() == "https://www.google.com/maps/search/?api=1&query=Taipei%20101"
+        assert result.stderr == ""
+    else:
+        assert result.stdout == "" and "InvalidMapsUrlError" in result.stderr
+    assert list(tmp_path.iterdir()) == []

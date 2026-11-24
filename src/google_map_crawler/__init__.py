@@ -1,4 +1,4 @@
-"""Offline data contracts and tools for a Google Maps crawler library."""
+"""Data contracts, matching tools and Maps URL expansion for the crawler library."""
 
 from .exceptions import (
     AmbiguousPlaceMatchError,
@@ -13,6 +13,7 @@ from .exceptions import (
     ParseError,
     PlaceNotFoundError,
     UrlExpansionError,
+    UrlExpansionTimeoutError,
 )
 from .identity import (
     create_location_id,
@@ -23,6 +24,7 @@ from .identity import (
 from .matching import PlaceComparison, compare_places, find_place_match
 from .models import PlaceDetail, PlaceSearchResult, Review, ReviewSummary, ReviewTag
 from .validation import validate_count, validate_non_empty_string
+from .urls import expand_short_url
 
 
 __all__ = [
@@ -38,6 +40,7 @@ __all__ = [
     "ParseError",
     "PlaceNotFoundError",
     "UrlExpansionError",
+    "UrlExpansionTimeoutError",
     "PlaceComparison",
     "PlaceDetail",
     "PlaceSearchResult",
@@ -45,6 +48,7 @@ __all__ = [
     "ReviewSummary",
     "ReviewTag",
     "create_location_id",
+    "expand_short_url",
     "compare_places",
     "find_place_match",
     "rebind_location_id",

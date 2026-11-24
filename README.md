@@ -14,7 +14,7 @@
 
 ## 目前進度
 
-目前已完成階段一、二，以及階段三的 Step 7：瀏覽器設定與生命週期管理。URL、條件等待與重試、捲動、Maps 頁面定位及爬取介面仍待後續步驟實作。
+目前已完成階段一、二，以及階段三的 Step 7–8：瀏覽器設定與生命週期管理、URL 驗證與短網址展開。通用條件等待與重試、捲動、Maps 選擇器及爬取介面仍待後續步驟實作。
 
 開發步驟與驗證結果記錄於 [agent.md](agent.md)，每一步的獨立計畫存放在 `agent/`。
 
@@ -40,6 +40,7 @@
 | `compare_places(existing, incoming)` | 以既有非空欄位為基準比較，回傳不可變的 `PlaceComparison` |
 | `find_place_match(incoming, candidates)` | 從差異不超過兩欄者選出差異唯一最少的候選；無符合回傳 `None`，最低差異並列時拋出錯誤 |
 | `rebind_location_id(record, location_id)` | 回傳套用目標 ID 的新模型，包含摘要的子評論與標籤；不修改原物件 |
+| `expand_short_url(url, *, timeout=30, max_redirects=10, max_retries=3, browser_fallback=True)` | 驗證完整 URL 或展開短網址，直接回傳 URL 字串 |
 
 所有模型使用具名參數建構，`location_id` 必填；兩種地點模型的 `maps_url` 亦必填。只有新地點紀錄需配置 ID，評論與標籤應沿用對應地點的 ID。
 
@@ -98,7 +99,31 @@ if match is not None:
 - 摘要內的評論與標籤須使用相同的 `location_id`，錯誤關聯會被拒絕，不會自動覆寫子物件的 ID。
 - 模型複製傳入的清單容器；子模型物件本身不會自動深複製。後續欄位賦值或清單修改不會自動觸發建構時驗證。
 - `to_dict()` 回傳與原物件分離的巢狀字典，保留空值與清單順序，時間轉為 UTC ISO 8601 字串；呼叫端可再交給 `json.dumps()`。
-- 目前 `maps_url` 僅驗證為非空字串，支援網址形式、短網址展開與地點定位可用性留待 URL 階段實作。
+- 模型中的 `maps_url` 仍僅驗證為非空字串，不自動展開或連線；需要 URL 檢查時明確呼叫下列工具。
+
+### URL 驗證與短網址展開
+
+```python
+from google_map_crawler import expand_short_url
+from google_map_crawler.urls import validate_maps_url
+
+url = "https://www.google.com/maps/search/?api=1&query=Taipei%20101"
+assert validate_maps_url(url) == url  # 離線格式驗證。
+assert expand_short_url(url) == url  # 完整 URL 直接回傳，不連線。
+
+# 短網址會連線；必要時啟動 headless Chrome，結束或失敗時清理。
+# expanded = expand_short_url("https://maps.app.goo.gl/PrYs3qc14ipRMSHu7")
+```
+
+支援 HTTP／HTTPS 的 `maps.app.goo.gl/<token>`、`goo.gl/maps/<token>`，以及 `google.com`、`www.google.com`、`maps.google.com` 的 `/maps/…`。`/maps` 根路徑須有非空 `q`、`query`、`cid`、`ll`、`saddr` 或 `daddr` 參數，`maps.google.com` 亦接受根路徑的位置查詢。國別網域、帳密、非預設連接埠、反斜線、原始空白及無效編碼會被拒絕。
+
+完整 URL 原樣回傳，定位參數與 fragment 不會被刪除。工具不產生或改變 location_id，也不驗證地點的詳細欄位；公開短網址的實測範圍見 [Step 8](agent/step8.md)。
+
+HTTP 與瀏覽器共用 `timeout` 的剩餘時間，以及 `max_retries + 1` 次策略嘗試（最多四次）；切換至瀏覽器也占一次。`max_retries=0` 只做 HTTP，`browser_fallback=False` 明確停用 Chrome。HTTP 轉址不算重試，另受跨嘗試累積的 `max_redirects` 限制；只重試暫時性連線錯誤、逾時與 429／500／502／503／504。
+
+timeout 為有限正數，max_redirects 為非負整數，max_retries 為 0–3 整數。所有參數在 I/O 前驗證；DNS、瀏覽器啟動及清理等底層阻塞不能保證被硬中斷，時間預算不是嚴格 wall-clock 上限。瀏覽器內部跳轉受剩餘時間限制，不計入 HTTP 轉址計數。
+
+完整使用方式見 [examples/expand_url.py](examples/expand_url.py)。
 
 ### 例外處理
 
@@ -106,7 +131,9 @@ if match is not None:
 
 `AmbiguousPlaceMatchError` 表示最低差異數仍有多筆候選並列，其 `matches` tuple 提供這些候選的 `PlaceComparison`，可查看 ID 及差異欄位。
 
-另已建立 `InvalidMapsUrlError`、`PlaceNotFoundError`、`PageLoadTimeoutError` 與 `ParseError`，供後續 URL 與瀏覽器流程使用；對應功能目前尚未實作。
+URL 格式無效使用 `InvalidMapsUrlError`；短網址 HTTP 404／410 或明確失效頁使用 `PlaceNotFoundError`；HTTP 401／403、已知登入／驗證跳轉使用 `PageAccessBlockedError`。逾時使用 `UrlExpansionTimeoutError`（繼承 `UrlExpansionError`），其他展開失敗使用 `UrlExpansionError` 並保留原因鏈。無法建立或清理 Chrome 時亦可能回報 `BrowserStartError`／`BrowserCleanupError`。
+
+`PageLoadTimeoutError` 與 `ParseError` 留待後續頁面操作及解析功能使用。
 
 ## 瀏覽器設定與生命週期
 
@@ -124,8 +151,6 @@ with session as driver:
 session 為單次使用，拒絕重入或關閉後重開；`close()` 可重複呼叫。若有原始操作錯誤，保留同一錯誤並附加清理失敗註記；沒有操作錯誤但清理失敗時拋出 `BrowserCleanupError`，可讀取 `errors`。session 的 `cleanup_errors` 亦保留原始清理錯誤。啟動或初始設定失敗使用 `BrowserStartError` 並保留原因鏈。
 
 測試可傳入 `driver_factory(config)`。工廠須建立新 driver，回傳後的 driver 與其 service 交由 session 管理；回傳前失敗的未交接資源由工廠自行清理。不要回傳使用者正在使用的 driver。清理皆失敗時無法保證程序已退出，會明確回報。
-
-`UrlExpansionError` 與 `PageAccessBlockedError` 已定義為後續 URL 展開及登入／驗證要求的分類，目前不代表相關流程已完成。
 
 ## 開發環境
 
@@ -148,12 +173,20 @@ python -m venv .venv
 
 測試使用已安裝的套件，不需要修改 `PYTHONPATH`。建置產物位於 `dist/`；目前所有單元測試及離線範例不需要網路、Chrome 或資料庫。
 
-真實 Chrome 測試預設跳過，明確啟用後只載入本機示意頁，驗證正常及例外路徑的設定與程序退出：
+真實 Chrome 測試預設跳過，明確啟用後只存取本機示意頁，驗證 session 與 URL 的 HTTP／JavaScript 轉址、逾時及程序退出：
 
 ```powershell
 $env:GOOGLE_MAP_CRAWLER_RUN_BROWSER_TESTS = "1"
-.venv\Scripts\python.exe -m pytest -p no:cacheprovider tests/integration/test_browser_session.py
+.venv\Scripts\python.exe -m pytest -p no:cacheprovider tests/integration/test_browser_session.py tests/integration/test_urls.py
 Remove-Item Env:GOOGLE_MAP_CRAWLER_RUN_BROWSER_TESTS
+```
+
+公開 Maps 連結另行 opt-in，需網路與 Chrome，驗證故宮園區及台北 101 短網址的最終地點標題；外部頁面、網址或存取限制可能改變：
+
+```powershell
+$env:GOOGLE_MAP_CRAWLER_RUN_MAPS_TESTS = "1"
+.venv\Scripts\python.exe -X utf8 -m pytest -s -p no:cacheprovider tests/integration/test_maps_urls.py
+Remove-Item Env:GOOGLE_MAP_CRAWLER_RUN_MAPS_TESTS
 ```
 
 瀏覽器行為變更須更新並執行實際測試，不能只以假 driver 測試代替。完整分步與驗證紀錄見 [agent.md](agent.md)。
@@ -161,6 +194,7 @@ Remove-Item Env:GOOGLE_MAP_CRAWLER_RUN_BROWSER_TESTS
 ```powershell
 .venv\Scripts\python.exe -X utf8 examples/create_models.py
 .venv\Scripts\python.exe -X utf8 examples/match_places.py
+.venv\Scripts\python.exe -X utf8 examples/expand_url.py
 ```
 
 ## 規格與開發順序

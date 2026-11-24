@@ -25,3 +25,14 @@
 3. 最低差異數並列時，捕捉 `AmbiguousPlaceMatchError`，列出 `matches` 內的候選 ID 與差異欄位。
 
 比對與 ID 套用分開執行，不會合併欄位。原始資料、時間與清單內容保留；範例只輸出至標準輸出，不連線或儲存。
+
+## URL 驗證與短網址展開
+
+```powershell
+.venv\Scripts\python.exe -X utf8 examples/expand_url.py
+.venv\Scripts\python.exe -X utf8 examples/expand_url.py "https://maps.app.goo.gl/PrYs3qc14ipRMSHu7" --timeout 30
+```
+
+不帶 URL 時使用完整 Maps URL，離線驗證後直接輸出。傳入短網址時會連線；先用 HTTP，必要時啟動自有 headless Chrome，回傳後清理。`--no-browser` 可停用瀏覽器，`--max-retries 0` 只允許一次 HTTP 策略嘗試；HTTP 轉址本身不算重試。
+
+範例只將回傳值印到標準輸出，失敗時將例外名稱與訊息印到標準錯誤並以狀態碼 2 結束，不儲存資料或配置 location_id。
