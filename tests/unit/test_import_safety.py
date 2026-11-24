@@ -24,11 +24,30 @@ sys.addaudithook(prevent_external_effects)
 
 import google_map_crawler
 from google_map_crawler.browser import BrowserConfig, BrowserSession
+from google_map_crawler.interaction import click_with_retry, retry_operation, wait_for_element, wait_until
 
 config = BrowserConfig()
 session = BrowserSession(config)
 assert "selenium" not in sys.modules
 session.close()
+
+for call in (
+    lambda: wait_for_element(None, ("id", "example"), timeout=0),
+    lambda: wait_until(None, None),
+    lambda: retry_operation(None),
+    lambda: retry_operation(lambda seconds: True, max_retries=4),
+    lambda: click_with_retry(None, ("id", "example"), is_complete=None),
+):
+    try:
+        call()
+    except google_map_crawler.InvalidInputError:
+        pass
+    else:
+        raise AssertionError("Invalid wait arguments were accepted")
+assert "selenium" not in sys.modules
+
+assert retry_operation(lambda seconds: 0) == 0
+assert "selenium" not in sys.modules
 
 full_url = "https://www.google.com/maps/place/Example/@25,121,17z"
 assert google_map_crawler.expand_short_url(full_url) == full_url

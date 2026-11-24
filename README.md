@@ -14,7 +14,7 @@
 
 ## 目前進度
 
-目前已完成階段一、二，以及階段三的 Step 7–8：瀏覽器設定與生命週期管理、URL 驗證與短網址展開。通用條件等待與重試、捲動、Maps 選擇器及爬取介面仍待後續步驟實作。
+目前已完成階段一、二，以及階段三的 Step 7–9：瀏覽器生命週期、URL 展開、條件等待與有限重試。捲動、Maps 選擇器及爬取介面仍待後續實作，階段三尚未全部完成。
 
 開發步驟與驗證結果記錄於 [agent.md](agent.md)，每一步的獨立計畫存放在 `agent/`。
 
@@ -133,7 +133,7 @@ timeout 為有限正數，max_redirects 為非負整數，max_retries 為 0–3 
 
 URL 格式無效使用 `InvalidMapsUrlError`；短網址 HTTP 404／410 或明確失效頁使用 `PlaceNotFoundError`；HTTP 401／403、已知登入／驗證跳轉使用 `PageAccessBlockedError`。逾時使用 `UrlExpansionTimeoutError`（繼承 `UrlExpansionError`），其他展開失敗使用 `UrlExpansionError` 並保留原因鏈。無法建立或清理 Chrome 時亦可能回報 `BrowserStartError`／`BrowserCleanupError`。
 
-`PageLoadTimeoutError` 與 `ParseError` 留待後續頁面操作及解析功能使用。
+條件等待逾時使用 `PageLoadTimeoutError`，它繼承 `PageWaitError`；其他 Selenium 等待失敗使用 `PageWaitError`。可讀取 `operation`、`locator`、`state`、`timeout`、`last_error` 與原因鏈；無效 selector／失效 session 等錯誤立即回報。`ParseError` 留待後續解析功能使用。
 
 ## 瀏覽器設定與生命週期
 
@@ -146,11 +146,75 @@ with session as driver:
     print(driver.title)
 ```
 
-匯入、建立設定或 session 都不啟動瀏覽器；進入 `with` 才建立本次專用 Chrome，離開時執行 `quit()` 並清理自有 Service。預設 headless，載入 timeout 為 30 秒、implicit wait 為 0。元素等待 timeout、重試與捲動相關欄位目前只做設定驗證，對應工具尚未實作。
+匯入、建立設定或 session 都不啟動瀏覽器；進入 `with` 才建立本次專用 Chrome，離開時執行 `quit()` 並清理自有 Service。預設 headless，載入 timeout 為 30 秒、implicit wait 為 0。`wait_timeout`、`max_retries` 可明確傳給下列工具，工具不自動讀取 session 設定；捲動相關欄位目前仍只做設定驗證。
 
 session 為單次使用，拒絕重入或關閉後重開；`close()` 可重複呼叫。若有原始操作錯誤，保留同一錯誤並附加清理失敗註記；沒有操作錯誤但清理失敗時拋出 `BrowserCleanupError`，可讀取 `errors`。session 的 `cleanup_errors` 亦保留原始清理錯誤。啟動或初始設定失敗使用 `BrowserStartError` 並保留原因鏈。
 
 測試可傳入 `driver_factory(config)`。工廠須建立新 driver，回傳後的 driver 與其 service 交由 session 管理；回傳前失敗的未交接資源由工廠自行清理。不要回傳使用者正在使用的 driver。清理皆失敗時無法保證程序已退出，會明確回報。
+
+## 條件等待
+
+`google_map_crawler.interaction` 提供 `wait_for_element()` 與 `wait_until()`；匯入不啟動瀏覽器或載入 Selenium。以下需 Chrome，僅載入本機示意內容：
+
+```python
+from google_map_crawler.browser import BrowserConfig, BrowserSession
+from google_map_crawler.interaction import wait_for_element, wait_until
+
+config = BrowserConfig(wait_timeout=5)
+with BrowserSession(config) as driver:
+    driver.get("data:text/html,<main id='detail' data-ready='true'>Ready</main>")
+    wait_until(
+        driver,
+        lambda d: d.find_element("id", "detail").get_attribute("data-ready") == "true",
+        timeout=config.wait_timeout, operation="detail_data_ready",
+    )
+    panel = wait_for_element(
+        driver, ("id", "detail"), state="visible",
+        timeout=config.wait_timeout, operation="detail_panel",
+    )
+    phones = panel.find_elements("css selector", "[data-field='phone']")
+    phone = phones[0].text if phones else None
+```
+
+`wait_for_element(driver, locator, *, state="visible", timeout=10, operation="wait_for_element")` 回傳符合條件的元素。state 支援 `present`（存在）、`visible`（可見）、`clickable`（可見且啟用）；clickable 不保證未被遮擋，也不執行點擊。
+
+`wait_until(driver, condition, *, timeout=10, operation="wait_until", locator=None)` 回傳條件首次得到的 truthy 值；falsy 值繼續等待。locator 僅用於錯誤診斷，回呼須自行以 driver 重新查找元素，避免持有失效元素；回呼應只讀狀態且及時返回。遮擋解除等條件可透過此介面表達。
+
+兩者均使用一次 explicit wait，缺少或 stale 元素只在同一截止時間內重新檢查，沒有額外操作重試。driver 的 implicit wait 必須為 0，非零時拒絕且不修改設定。timeout 為有限正數（不接受 bool），預設 10 秒；底層命令或回呼若阻塞，不能保證在 deadline 硬中斷。
+
+所有元素等待逾時都拋出錯誤，不以 None／空清單代替。上例須先確認容器與資料已就緒，才將缺少的可選電話欄位設為 None；必要欄位仍應明確等待。
+
+## 有限重試
+
+`retry_operation()` 只接受可安全重做的 action(remaining_seconds)，最多初次加三次重試。所有嘗試與可選的 recover(error, remaining_seconds) 共用時間預算；應將剩餘時間交給等待工具。回傳 None、False 或空集合都算成功，只有例外才進入錯誤分類。
+
+```python
+from urllib.parse import quote
+from google_map_crawler.browser import BrowserSession
+from google_map_crawler.interaction import click_with_retry, retry_operation, wait_for_element
+
+html = """<button id="open" onclick="document.getElementById('panel').hidden=false">Open</button>
+<main id="panel" hidden>Ready</main>"""
+with BrowserSession() as driver:
+    driver.get("data:text/html;charset=utf-8," + quote(html))
+    label = retry_operation(
+        lambda remaining: wait_for_element(driver, ("id", "open"), timeout=remaining).text,
+        operation="read_button", timeout=10,
+    )
+    opened = click_with_retry(
+        driver, ("id", "open"),
+        is_complete=lambda d: d.find_element("id", "panel").is_displayed(),
+        operation="open_panel", timeout=10,
+    )
+```
+
+`click_with_retry()` 必須提供只讀的 `is_complete(driver)`。每次操作前先查核；click 報錯後亦查核，已生效便回傳確認結果。只有明確遭拒且尚未生效的點擊可以重做。未知結果或查核失敗會立即停止；成功點擊後等待完成逾時也不再點擊。可提供 recover(driver, error, remaining_seconds) 等待遮擋解除，driver 的 implicit wait 必須為 0。
+
+泛用操作僅對具體 stale、點擊遭拒、已知暫時傳輸錯誤重試；既有等待逾時、無效輸入、解析失敗、失效連結、驗證要求、URL 展開與未知錯誤不自動重跑。耗盡／復原失敗使用 `OperationRetryError`，共用預算耗盡使用 `OperationRetryTimeoutError`；可讀取 operation、locator、attempts、max_retries、timeout、reason、last_error 及原因鏈。
+
+禁止重試包重試、條件回呼內啟動另一個等待／重試，以及重試或等待包住短網址展開，違反時以 `InvalidInputError` 停止；短網址工具已有自己的預算，請獨立呼叫。允許重試內使用單次條件等待，也允許完整 URL 離線回傳。這個限制只涵蓋本套件控制介面。
+
+action 應先在局部取得資料，成功回傳後再由呼叫端收集並依識別值去重；工具不回復任意回呼已造成的外部副作用。timeout 無法硬中斷阻塞的命令或回呼。完整介面與錯誤規則見 [spec.md](spec.md)，本機實測見 [Step 9](agent/step9.md)。
 
 ## 開發環境
 
@@ -173,11 +237,11 @@ python -m venv .venv
 
 測試使用已安裝的套件，不需要修改 `PYTHONPATH`。建置產物位於 `dist/`；目前所有單元測試及離線範例不需要網路、Chrome 或資料庫。
 
-真實 Chrome 測試預設跳過，明確啟用後只存取本機示意頁，驗證 session 與 URL 的 HTTP／JavaScript 轉址、逾時及程序退出：
+真實 Chrome 測試預設跳過，明確啟用後只存取本機示意頁，驗證條件等待、有限重試、點擊狀態查核、session 與 URL 的 HTTP／JavaScript 轉址、逾時及程序退出：
 
 ```powershell
 $env:GOOGLE_MAP_CRAWLER_RUN_BROWSER_TESTS = "1"
-.venv\Scripts\python.exe -m pytest -p no:cacheprovider tests/integration/test_browser_session.py tests/integration/test_urls.py
+.venv\Scripts\python.exe -m pytest -p no:cacheprovider tests/integration/test_browser_session.py tests/integration/test_urls.py tests/integration/test_interaction.py
 Remove-Item Env:GOOGLE_MAP_CRAWLER_RUN_BROWSER_TESTS
 ```
 

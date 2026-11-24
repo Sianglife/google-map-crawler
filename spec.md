@@ -112,7 +112,7 @@
 
 - 從 `google_map_crawler.browser` 使用 `BrowserConfig`、`BrowserSession`，不在套件根目錄匯出瀏覽器操作介面。
 - `BrowserConfig` 使用具名參數且不可變：`headless=True`、`language="zh-TW"`、`page_load_timeout=30`、`wait_timeout=10`、`max_retries=3`、`no_progress_limit=3`、`max_scroll_rounds=100`。
-- timeout 必須為有限正數，捲動相關計數須為正整數，重試次數為 0–3 的整數；數值不接受布林值，headless 必須為布林值，語言須為非空字串。重試及捲動設定的操作行為留待相應工具實作。
+- timeout 必須為有限正數，捲動相關計數須為正整數，重試次數為 0–3 的整數；數值不接受布林值，headless 必須為布林值，語言須為非空字串。wait_timeout 及 max_retries 由呼叫端明確傳入操作工具；捲動設定的操作行為留待相應工具實作。
 - `BrowserSession(config=None, driver_factory=None)` 建構時只保存有效設定，進入 `with` 才啟動 Chrome，在區塊內回傳 driver。套用 page load timeout 並將 implicit wait 設為 0。
 - 預設使用 Selenium 4 的 Chrome driver 與獨立使用者設定檔，Windows Service 隱藏啟動；匯入、設定及 session 建構不執行 Selenium Manager 或下載 driver。
 - 測試工廠介面為 `driver_factory(config)`，必須建立新 driver。回傳後的 driver 與其 `service` 由 session 管理；工廠尚未回傳即失敗時，內部未交接資源由工廠負責。預設建立流程會先保留 Service，確保建構 driver 中途失敗仍能清理已知資源。
@@ -121,6 +121,33 @@
 - 啟動／初始設定失敗清理後拋出 `BrowserStartError` 並保留原因鏈；只有清理失敗時拋出 `BrowserCleanupError`，其 `errors` tuple 保存原始錯誤。中斷與退出訊號不轉成一般啟動錯誤。
 - URL 工具使用 `UrlExpansionError`（含子類 `UrlExpansionTimeoutError`）及 `PageAccessBlockedError` 區分展開失敗、逾時與登入／驗證要求；瀏覽器 session 的啟動與清理錯誤保留原有分類。
 - 若 driver 與 Service 清理皆失敗，明確回報而不宣稱資源已退出；不猜測或終止其他使用者程序。
+
+### 條件等待（Step 9 工作一）
+
+- 從 `google_map_crawler.interaction` 使用 `wait_for_element(driver, locator, *, state="visible", timeout=10, operation="wait_for_element")` 與 `wait_until(driver, condition, *, timeout=10, operation="wait_until", locator=None)`；不在套件根目錄匯出操作工具。
+- locator 為 `(by, value)` tuple，by 支援 Selenium 的 id、xpath、link text、partial link text、name、tag name、class name、css selector，value 須為非空字串；不接受固定 WebElement 作為定位輸入。
+- state 僅接受 `present`（存在）、`visible`（可見）與 `clickable`（可見且啟用）；clickable 不保證未被遮擋。每次輪詢重新定位，缺少或 stale 時在同一次等待內繼續，不重新配置 timeout。
+- 自訂 condition 接收 driver，回傳 truthy 值即原樣回傳該值，falsy 則繼續等待；locator 僅作診斷用途，condition 須自行重新查找元素。回呼應只讀狀態且及時返回，不執行點擊／導航等副作用。
+- 所有一般參數在操作 driver 前驗證；timeout 為有限正數（不接受 bool），operation 須為非空字串。driver 必須使用 implicit wait 0；非零時拒絕，不修改呼叫端設定。
+- 一次 explicit wait 使用 monotonic 截止時間，輪詢間隔 0.1 秒，不以固定 sleep 判定就緒；不包含操作重試。底層 WebDriver 命令／使用者回呼可能阻塞，無法保證硬中斷或嚴格 wall-clock 上限。
+- 逾時使用既有 `PageLoadTimeoutError`，其他 Selenium 等待失敗使用新增 `PageWaitError`。`PageLoadTimeoutError` 繼承 `PageWaitError`，仍繼承 `CrawlerError`；兩者提供 operation、locator、state、timeout、last_error，保留原始 Selenium 原因鏈。last_error 為最後一次缺少／stale 例外，條件僅回傳 falsy 時可為 None；不額外查詢 DOM 或 URL 作為錯誤處理。
+- 無效 selector／失效 session 等非暫時 Selenium 錯誤立即回報。其他套件例外及非 Selenium 的回呼錯誤原樣拋出，不當作暫時缺少元素。
+- 所有元素等待均為必要等待，逾時不回傳假空結果。可選欄位由呼叫端在確認必要容器及資料已就緒後使用 find_elements 查詢，明確沒有欄位時才使用預設值。
+- 條件回呼內不得啟動其他條件等待、操作重試或短網址策略；可在單一操作重試中使用條件等待，並將剩餘時間傳入。URL 展開獨立呼叫時的等待、重試與時間預算維持原樣。
+
+### 有限重試（Step 9 工作二）
+
+- 從 `google_map_crawler.interaction` 使用 `retry_operation(action, *, max_retries=3, timeout=30, operation="retry_operation", locator=None, recover=None)`；不在套件根目錄匯出操作工具。
+- action(remaining_seconds) 須為可安全重做的操作，回傳資料後才由呼叫端收集。None、False、0、空集合都是合法成功值，失敗須拋出例外；工具不回復任意回呼已造成的外部副作用，不替呼叫端保存或去重資料。
+- 最多 max_retries + 1 次 action，max_retries 須為 0–3 整數且不接受 bool；timeout 為有限正數，operation 非空，locator 與等待工具同規則。參數在執行回呼／操作 driver 前驗證。
+- 所有 action 與 recover(error, remaining_seconds) 共用 monotonic 時間預算；只有尚有下一次嘗試才執行 recover，成功值在截止時間後才返回亦回報逾時。命令與回呼不能保證硬中斷，不宣稱嚴格 wall-clock 上限。
+- 可重試錯誤為具體 stale、點擊明確遭拒（ElementClickIntercepted／ElementNotInteractable），以及 timeout／reset／abort／refused／暫時 DNS 等已知傳輸錯誤；PageWaitError 僅於直接原因為上述元素錯誤時可重試。既有條件等待逾時不另配完整預算。
+- 無效輸入、NoSuchElement（應使用等待）、確認失效、解析失敗、驗證要求、URL 策略失敗、無效 selector／session、未知 WebDriver／Selenium timeout 及其他未知錯誤皆不盲目重試。永久 action 錯誤保留原例外；不可透過解包原因鏈將明確永久錯誤改判為暫時。
+- 耗盡或 recover 失敗使用 `OperationRetryError`，時間預算耗盡使用子類 `OperationRetryTimeoutError`。兩者公開匯出，提供 operation、locator、attempts、max_retries、timeout、reason、last_error；原因鏈保留最後操作或 recovery 例外。reason 為 attempts_exhausted、timeout、recovery_failed、uncertain_outcome、verification_failed。
+- `click_with_retry(driver, locator, *, is_complete, max_retries=3, timeout=30, operation="click", recover=None)` 要求必要的只讀完成條件；每次嘗試先確認狀態，已生效時原樣回傳 truthy 確認結果，不再定位或點擊。driver 須使用 implicit wait 0。
+- click 發生 WebDriver／傳輸錯誤時重新查核；已生效則回傳，只有明確遭拒且未生效才可重點。未知結果或查核失敗立即以 OperationRetryError 停止；已成功 click 後用同一剩餘時間等待完成，驗證逾時不重新點擊。recover(driver, error, remaining_seconds) 可等待遮擋解除。
+- 禁止重試包重試、等待回呼內開始重試，以及重試／等待包短網址策略；違反時於內層動作前拋出 InvalidInputError。允許重試內的單次等待與完整 URL 的離線直接回傳。這個層級限制適用本套件同步控制介面，不監控呼叫端自行撰寫的其他迴圈或第三方重試器。
+- 去重及保存由後續收集流程依識別值處理，失敗嘗試的局部結果不得先加入外部集合；不在本步定案批次爬取中途失敗的部分結果回傳。
 
 ## 4. 資料結構與預設值
 

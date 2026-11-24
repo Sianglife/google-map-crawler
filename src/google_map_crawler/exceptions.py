@@ -29,8 +29,46 @@ class PlaceNotFoundError(CrawlerError):
     """A Maps link is unavailable or the requested place cannot be found."""
 
 
-class PageLoadTimeoutError(CrawlerError):
+class PageWaitError(CrawlerError):
+    """A page wait failed; diagnostic context does not perform driver I/O."""
+
+    def __init__(
+        self, message: str = "Page wait failed", *, operation: str | None = None,
+        locator: tuple[str, str] | None = None, state: str | None = None,
+        timeout: float | None = None, last_error: BaseException | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.operation = operation
+        self.locator = locator
+        self.state = state
+        self.timeout = timeout
+        self.last_error = last_error
+
+
+class PageLoadTimeoutError(PageWaitError):
     """A page or required element did not become ready within its timeout."""
+
+
+class OperationRetryError(CrawlerError):
+    """A bounded operation failed, without silently returning partial results."""
+
+    def __init__(
+        self, message: str, *, operation: str, attempts: int, max_retries: int,
+        timeout: float, reason: str, locator: tuple[str, str] | None = None,
+        last_error: BaseException | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.operation = operation
+        self.attempts = attempts
+        self.max_retries = max_retries
+        self.timeout = timeout
+        self.reason = reason
+        self.locator = locator
+        self.last_error = last_error
+
+
+class OperationRetryTimeoutError(OperationRetryError):
+    """An operation and its recovery exhausted their shared time budget."""
 
 
 class ParseError(CrawlerError):

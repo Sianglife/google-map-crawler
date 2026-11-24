@@ -3,26 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite
 from typing import TYPE_CHECKING, Any, Callable
 
 from .exceptions import BrowserCleanupError, BrowserStartError, InvalidInputError
-from .validation import validate_count, validate_non_empty_string
+from .validation import validate_count, validate_non_empty_string, validate_positive_timeout
 
 if TYPE_CHECKING:
     from selenium.webdriver.chrome.webdriver import WebDriver
-
-
-def _positive_timeout(value: float, *, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise InvalidInputError(f"{name} must be a finite positive number")
-    try:
-        result = float(value)
-    except OverflowError as error:
-        raise InvalidInputError(f"{name} must be a finite positive number") from error
-    if not isfinite(result) or result <= 0:
-        raise InvalidInputError(f"{name} must be a finite positive number")
-    return result
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -42,7 +29,7 @@ class BrowserConfig:
             raise InvalidInputError("headless must be a boolean")
         validate_non_empty_string(self.language, name="language")
         for name in ("page_load_timeout", "wait_timeout"):
-            object.__setattr__(self, name, _positive_timeout(getattr(self, name), name=name))
+            object.__setattr__(self, name, validate_positive_timeout(getattr(self, name), name=name))
         if validate_count(self.max_retries, name="max_retries") > 3:
             raise InvalidInputError("max_retries must be between 0 and 3")
         for name in ("no_progress_limit", "max_scroll_rounds"):

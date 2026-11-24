@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-TW">
+<meta charset="utf-8">
+<title>Condition wait fixture</title>
+<style>
+  #overlay { position: fixed; inset: 0; background: white; z-index: 10; }
+</style>
+<button id="hidden" style="display:none">Reveal later</button>
+<button id="disabled" disabled>Enable later</button>
+<button id="replace">Replace this node</button>
+<button id="covered" onclick="window.clicks += 1">Covered button</button>
+<div id="overlay">Loading</div>
+<main id="detail" hidden data-ready="false"><h1>Local place</h1></main>
+<script>
+  window.clicks = 0;
+  window.reveal = () => setTimeout(() => {
+    document.getElementById('hidden').style.display = 'block';
+  }, 120);
+  window.enable = () => setTimeout(() => {
+    document.getElementById('disabled').disabled = false;
+  }, 120);
+  window.uncover = () => setTimeout(() => {
+    document.getElementById('overlay').remove();
+  }, 120);
+  window.loadDetail = () => setTimeout(() => {
+    const detail = document.getElementById('detail');
+    detail.hidden = false;
+    detail.dataset.ready = 'true';
+  }, 120);
+  window.replaceNode = node => node.replaceWith(node.cloneNode(true));
+</script>
+</html>

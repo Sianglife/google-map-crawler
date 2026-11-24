@@ -6,7 +6,9 @@
 
 階段一「套件骨架與資料契約」及階段二「地點比對與 ID 沿用」已完成，由 Step 1–6 分別記錄。可用功能包含五種資料模型、例外分類、ID／驗證工具、地點比對、最佳候選選擇、ID 副本同步與離線範例；搜尋及詳細頁／評論擷取尚未實作。
 
-階段一完整驗證結果見 [Step 5](agent/step5.md)，階段二結果見 [Step 6](agent/step6.md)。階段三依功能種類拆成 Step 7–12；Step 7 的設定與生命週期、Step 8 的 URL 驗證與短網址展開已完成，並通過實際 Chrome／公開 Maps 測試。最新離線回歸為 360 項通過，9 項 opt-in 整合測試另行啟用後全數通過；詳細紀錄見 [Step 8](agent/step8.md)。Step 9–12 尚未實作。
+階段一完整驗證結果見 [Step 5](agent/step5.md)，階段二結果見 [Step 6](agent/step6.md)。階段三依功能種類拆成 Step 7–12；Step 7 的設定與生命週期、Step 8 的 URL 驗證與短網址展開、Step 9 的條件等待與有限重試已完成。Step 10–12 尚未實作，階段三仍為部分完成。
+
+最新離線回歸為 470 項通過、21 項整合測試預設跳過；本次另啟用本機測試，結果為 19 項通過、2 項公開 Maps 測試跳過。sdist／wheel 建置成功。公開 Maps 歷史結果見 [Step 8](agent/step8.md)，本次範圍與完整驗證紀錄見 [Step 9](agent/step9.md)。
 
 ## 步驟存檔規則
 
@@ -32,7 +34,7 @@
 | Step 6 | 階段 2：地點比對與 ID 沿用 | 欄位差異比對、最少差異候選優先、並列歧義與 ID 副本同步 | 已完成 | [step6.md](agent/step6.md) |
 | Step 7 | 階段 3 | 設定、Selenium 相依性、例外與瀏覽器生命週期 | 已完成 | [step7.md](agent/step7.md) |
 | Step 8 | 階段 3 | URL 驗證與短網址展開 | 已完成 | [step8.md](agent/step8.md) |
-| Step 9 | 階段 3 | 條件等待與操作重試 | 已規劃，尚未實作 | [step9.md](agent/step9.md) |
+| Step 9 | 階段 3 | 條件等待與操作重試 | 已完成 | [step9.md](agent/step9.md) |
 | Step 10 | 階段 3 | 捲動與內容收集 | 已規劃，尚未實作 | [step10.md](agent/step10.md) |
 | Step 11 | 階段 3 | Maps 頁面實測與選擇器 | 已規劃，尚未實作 | [step11.md](agent/step11.md) |
 | Step 12 | 階段 3 | 整合驗收 | 已規劃，尚未實作 | [step12.md](agent/step12.md) |

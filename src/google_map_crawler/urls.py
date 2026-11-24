@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from ._control import control_scope
 from .browser import BrowserConfig, BrowserSession
 from .exceptions import (
     InvalidInputError,
@@ -245,6 +246,11 @@ def expand_short_url(
     if kind == "full":
         return url
 
+    with control_scope("url"):
+        return _expand_short_url(url, config, max_redirects, browser_fallback)
+
+
+def _expand_short_url(url, config, max_redirects, browser_fallback):
     budget = _Budget(monotonic() + config.page_load_timeout, max_redirects)
     opener = _make_opener()
     phase = "http"
