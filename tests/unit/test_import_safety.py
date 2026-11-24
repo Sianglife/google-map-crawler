@@ -9,21 +9,26 @@ def test_import_from_another_directory_has_no_external_side_effects(tmp_path):
 import sys
 
 def prevent_external_effects(event, args):
-    if event in {
-        "socket.__new__",
-        "socket.connect",
-        "socket.getaddrinfo",
+    if event.startswith("socket.") or event in {
         "subprocess.Popen",
         "os.system",
         "os.posix_spawn",
         "os.exec",
         "os.spawn",
+        "os.startfile",
+        "os.startfile/2",
     }:
         raise AssertionError(f"Package import attempted an external effect: {event}")
 
 sys.addaudithook(prevent_external_effects)
 
 import google_map_crawler
+from google_map_crawler.browser import BrowserConfig, BrowserSession
+
+config = BrowserConfig()
+session = BrowserSession(config)
+assert "selenium" not in sys.modules
+session.close()
 
 location_id = google_map_crawler.resolve_location_id()
 place = google_map_crawler.PlaceDetail(
@@ -32,6 +37,14 @@ place = google_map_crawler.PlaceDetail(
 review = google_map_crawler.Review(location_id=location_id, rating=5)
 summary = google_map_crawler.ReviewSummary(location_id=location_id, reviews=[review])
 assert place.to_dict()["location_id"] == summary.to_dict()["location_id"]
+
+existing_id = google_map_crawler.create_location_id()
+existing = {"location_id": existing_id, "maps_url": place.maps_url}
+assert google_map_crawler.compare_places(existing, place).is_match
+match = google_map_crawler.find_place_match(place, [existing])
+adopted = google_map_crawler.rebind_location_id(summary, match.existing_location_id)
+assert adopted.reviews[0].location_id == existing_id
+assert summary.reviews[0].location_id == location_id
 
 print(google_map_crawler.__name__)
 """

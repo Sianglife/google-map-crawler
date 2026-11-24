@@ -36,10 +36,32 @@
 - 除上述空值判定外，初版採欄位值直接比較，不額外做名稱、地址正規化或座標容差判斷。
 - `maps_url`、`rating`、`photos` 等只要在既有紀錄中有資料，也依相同規則計入，不另行豁免。
 - 比對有方向性，以既有紀錄為基準；新資料補上欄位後，若由呼叫端保存，該欄位會成為下一次比對的基準欄位。
-- 若多筆既有紀錄同時符合，不任選其中一筆合併；回報比對歧義，交由呼叫端處理。
+- 若多筆既有紀錄同時符合（差異不超過 2 個），優先選擇差異欄位數量最少的一筆，沿用其 `location_id`。
+- 若最少差異數仍有多筆並列，拋出 `AmbiguousPlaceMatchError`，交由呼叫端處理；不能以候選順序任選一筆。
+- 差異超過 2 個的紀錄不參與優先選擇；若無符合紀錄，保留新資料的 ID。
 - 搜尋列表資料不完整，不直接套用完整 `PlaceDetail` 的比對規則；跨紀錄的地點判定在取得詳細資料後進行。
 
 例：既有資料的名稱、地址等欄位有值，新資料只修正電話與網站，差異為 2，視為同一地點；若又改變名稱，差異為 3，則不符合。若既有資料沒有營業時間，而新資料補上營業時間，該新增資料不增加差異數。
+
+### 比對與 ID 套用介面
+
+| 方法 | 行為 | 回傳 |
+|---|---|---|
+| `compare_places(existing, incoming)` | 以一筆既有紀錄為基準，比較新詳細資料 | `PlaceComparison` |
+| `find_place_match(incoming, candidates)` | 完整檢查候選，從差異不超過兩欄者中選出差異唯一最少的一筆 | `PlaceComparison \| None` |
+| `rebind_location_id(record, location_id)` | 將已確認的 ID 套用到模型副本，原始物件不變 | 與輸入相同具體型別的模型 |
+
+- `incoming` 必須是 `PlaceDetail`，不能只提供 `PlaceSearchResult`。
+- `existing` 接受 `PlaceDetail` 或使用相同欄位名稱的 mapping；`candidates` 是這些紀錄的 iterable，包含只能讀取一次的 iterable。
+- 既有紀錄須有合法 UUID v4 `location_id`，但可缺少其他地點欄位。只比較目前 `PlaceDetail` 宣告的地點欄位，忽略 `_id` 等資料庫額外資訊，不先建立完整模型或補值。
+- 非空欄位須符合模型型別，評分須符合現有範圍與精度限制；不合法輸入回報 `InvalidInputError` 或其子類，不跳過候選或轉成不符合結果。
+- `PlaceComparison` 是不可變的結果，保存 `existing_location_id`、`compared_fields`、`different_fields`；欄位名稱以 tuple 保存，差異順序依 `PlaceDetail` 宣告順序。
+- `difference_count` 由 `different_fields` 的長度計算，`is_match` 為 `difference_count <= 2`。結果不保留可變的原始紀錄參照。
+- `find_place_match()` 不會修改或另產生地點 ID；沒有符合候選回傳 `None`，由呼叫端保留新資料 ID。最低差異並列時拋出 `AmbiguousPlaceMatchError`，其 `matches` 屬性包含並列最佳結果的 tuple。
+- 必須讀完全部候選才回傳或判定歧義；重複候選不自行去重。不以候選順序、欄位覆蓋率或權重決定結果。
+- `rebind_location_id()` 支援五種資料模型，驗證目標 ID，保留時間、非 ID 欄位與順序，即使 ID 相同也回傳副本。
+- 摘要須先複製並更新各則評論與標籤，再建立使用目標 ID 的摘要。副本的模型與清單不與原資料共用可變內容；失敗不修改原資料。
+- 比對及 ID 套用皆不讀寫資料庫，不自動儲存或合併欄位。呼叫端確認比對結果後，才明確套用 ID。
 
 ### 未來可改善或測試的條件
 
@@ -72,6 +94,20 @@
 `max_photos` 預設為 **20**，可由呼叫端調整：在 `get_place_detail()` 中限制該地點的照片數，在 `get_reviews()` 中限制每則評論的附圖數。設為 `0` 時不擷取照片，其他資料仍正常回傳。
 
 評論依實際抓取順序回傳，去重後保留首次取得的順序，不另外依評分或發表時間排序。
+
+### 瀏覽器設定與生命週期
+
+- 從 `google_map_crawler.browser` 使用 `BrowserConfig`、`BrowserSession`，不在套件根目錄匯出瀏覽器操作介面。
+- `BrowserConfig` 使用具名參數且不可變：`headless=True`、`language="zh-TW"`、`page_load_timeout=30`、`wait_timeout=10`、`max_retries=3`、`no_progress_limit=3`、`max_scroll_rounds=100`。
+- timeout 必須為有限正數，捲動相關計數須為正整數，重試次數為 0–3 的整數；數值不接受布林值，headless 必須為布林值，語言須為非空字串。重試及捲動設定的操作行為留待相應工具實作。
+- `BrowserSession(config=None, driver_factory=None)` 建構時只保存有效設定，進入 `with` 才啟動 Chrome，在區塊內回傳 driver。套用 page load timeout 並將 implicit wait 設為 0。
+- 預設使用 Selenium 4 的 Chrome driver 與獨立使用者設定檔，Windows Service 隱藏啟動；匯入、設定及 session 建構不執行 Selenium Manager 或下載 driver。
+- 測試工廠介面為 `driver_factory(config)`，必須建立新 driver。回傳後的 driver 與其 `service` 由 session 管理；工廠尚未回傳即失敗時，內部未交接資源由工廠負責。預設建立流程會先保留 Service，確保建構 driver 中途失敗仍能清理已知資源。
+- session 為單次使用，拒絕重入及關閉後重開；`close()` 可重複呼叫，已清理後不重複執行。
+- 正常或失敗時均先嘗試 `quit()`，再嘗試停止自有 Service。清理失敗保留於 `session.cleanup_errors` tuple；若有原始操作錯誤，保留該錯誤並附上清理失敗註記，不以清理錯誤覆蓋。
+- 啟動／初始設定失敗清理後拋出 `BrowserStartError` 並保留原因鏈；只有清理失敗時拋出 `BrowserCleanupError`，其 `errors` tuple 保存原始錯誤。中斷與退出訊號不轉成一般啟動錯誤。
+- `UrlExpansionError`、`PageAccessBlockedError` 分別預留給 URL 展開失敗與頁面要求登入／驗證；此處僅定義分類，不代表對應工具已完成。
+- 若 driver 與 Service 清理皆失敗，明確回報而不宣稱資源已退出；不猜測或終止其他使用者程序。
 
 ## 4. 資料結構與預設值
 
